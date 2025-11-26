@@ -54,7 +54,7 @@ async function searchAndAnalyzeNews(
 }
 
 **필수 준수사항**:
-- 최소 5개, 최대 15개의 기사를 검색하세요
+- 최소 3개, 최대 15개의 기사를 검색하세요
 - 각 기사의 keywords는 5개 이상 추출
 - evidence는 3개 이상의 구체적 근거 제시
 - summary는 기사 내용을 상세히 요약
@@ -86,7 +86,7 @@ async function searchAndAnalyzeNews(
         { role: "user", content: userPrompt },
       ],
       temperature: 0.1,
-      max_tokens: 8000,
+      max_tokens: 10000,
       // Perplexity 특정 옵션들
       // @ts-expect-error - Perplexity 전용 파라미터
       search_domain_filter: mediaNames.flatMap((name) => {
@@ -101,7 +101,7 @@ async function searchAndAnalyzeNews(
     });
 
     const content = response.choices[0]?.message?.content || "";
-    
+
     // 디버그: 실제 응답 출력
     console.log(`\n=== ${biasLabel} 언론 API 응답 ===`);
     console.log(content.substring(0, 2000));
@@ -112,7 +112,7 @@ async function searchAndAnalyzeNews(
     try {
       // JSON 블록 추출 시도 (여러 패턴 지원)
       let jsonStr = content;
-      
+
       // 1. ```json ... ``` 블록 추출
       const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonBlockMatch) {
@@ -124,26 +124,28 @@ async function searchAndAnalyzeNews(
           jsonStr = codeBlockMatch[1];
         } else {
           // 3. 첫 번째 { 부터 마지막 } 까지 추출
-          const firstBrace = content.indexOf('{');
-          const lastBrace = content.lastIndexOf('}');
+          const firstBrace = content.indexOf("{");
+          const lastBrace = content.lastIndexOf("}");
           if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
             jsonStr = content.substring(firstBrace, lastBrace + 1);
           }
         }
       }
-      
+
       // JSON 문자열 정리
       jsonStr = jsonStr.trim();
-      
-      console.log(`파싱할 JSON 문자열 (처음 500자): ${jsonStr.substring(0, 500)}`);
-      
+
+      console.log(
+        `파싱할 JSON 문자열 (처음 500자): ${jsonStr.substring(0, 500)}`
+      );
+
       result = JSON.parse(jsonStr);
 
       // articles 배열이 없으면 빈 배열로 초기화
       if (!result.articles) {
         result.articles = [];
       }
-      
+
       // bias 필드 추가
       result.articles = result.articles.map((article) => ({
         ...article,
@@ -153,11 +155,10 @@ async function searchAndAnalyzeNews(
         evidence: article.evidence || [],
         mainClaim: article.mainClaim || article.summary || "",
       }));
-      
+
       // 기본값 설정
       result.commonKeywords = result.commonKeywords || [];
       result.overallTrend = result.overallTrend || "";
-      
     } catch (parseError) {
       // JSON 파싱 실패 시 기본 응답 생성
       console.error("JSON parsing failed:", parseError);
