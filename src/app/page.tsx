@@ -98,7 +98,7 @@ export default function Home() {
             />
           </div>
           <h1 className="text-3xl font-black tracking-tight text-[#0033A0] mb-3">
-            정은영의 뉴스 관점 비교기
+            온저 3조 뉴스관점 비교 AI
           </h1>
           <p className="text-[#1a1a2e]/60 max-w-2xl mx-auto">
             같은 이슈, 다른 시선. 진보와 보수 언론의 보도 관점을 AI가 분석하여
