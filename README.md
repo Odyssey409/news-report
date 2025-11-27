@@ -1,60 +1,14 @@
 # 뉴스 관점 비교기
 
-진보와 보수 언론의 보도 관점을 AI(Perplexity Sonar Reasoning Pro)가 분석하여 비교해주는 웹 애플리케이션입니다.
+진보와 보수 언론의 보도 관점을 AI가 분석하여 비교해주는 웹 애플리케이션입니다.
 
-## ✨ 주요 기능
+## 주요 기능
 
 - **키워드 기반 뉴스 검색**: 원하는 키워드를 입력하면 관련 기사를 검색
 - **진보/보수 언론 분류**: 사전 정의된 언론사 분류에 따라 자동 분류
 - **AI 기반 분석**: 각 기사의 핵심 주장, 근거, 자주 등장하는 키워드 추출
 - **시각적 비교**: 좌우 레이아웃으로 진보/보수 관점 한눈에 비교
 - **날짜 범위 설정**: 특정 기간의 기사만 검색 가능
-
-## 🚀 시작하기
-
-### 1. 환경 변수 설정
-
-프로젝트 루트에 `.env.local` 파일을 생성하고 Perplexity API 키를 추가하세요:
-
-\`\`\`bash
-PERPLEXITY_API_KEY=pplx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-\`\`\`
-
-> API 키는 [Perplexity API 설정](https://www.perplexity.ai/settings/api)에서 발급받을 수 있습니다.
-
-### 2. 의존성 설치
-
-\`\`\`bash
-npm install
-\`\`\`
-
-### 3. 개발 서버 실행
-
-\`\`\`bash
-npm run dev
-\`\`\`
-
-브라우저에서 [http://localhost:3000](http://localhost:3000)으로 접속합니다.
-
-## 📰 언론사 분류 설정
-
-\`src/config/mediaSources.ts\` 파일에서 진보/보수 언론사 목록을 직접 수정할 수 있습니다:
-
-\`\`\`typescript
-// 진보 성향 언론사 목록
-export const PROGRESSIVE_MEDIA: MediaSource[] = [
-  { name: '한겨레', bias: 'progressive', domain: 'hani.co.kr' },
-  { name: '경향신문', bias: 'progressive', domain: 'khan.co.kr' },
-  // 여기에 추가...
-];
-
-// 보수 성향 언론사 목록
-export const CONSERVATIVE_MEDIA: MediaSource[] = [
-  { name: '조선일보', bias: 'conservative', domain: 'chosun.com' },
-  { name: '중앙일보', bias: 'conservative', domain: 'joongang.co.kr' },
-  // 여기에 추가...
-];
-\`\`\`
 
 ## 🛠 기술 스택
 
@@ -64,26 +18,6 @@ export const CONSERVATIVE_MEDIA: MediaSource[] = [
 - **AI Model**: Perplexity Sonar Reasoning Pro
 - **Icons**: Lucide React
 
-## 📁 프로젝트 구조
-
-\`\`\`
-src/
-├── app/
-│   ├── api/
-│   │   └── analyze/
-│   │       └── route.ts      # Perplexity API 연동
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx              # 메인 페이지
-├── components/
-│   ├── NewsCard.tsx          # 개별 기사 카드
-│   └── NewsSection.tsx       # 진보/보수 섹션
-├── config/
-│   └── mediaSources.ts       # 언론사 분류 설정 ⭐
-└── types/
-    └── index.ts              # 타입 정의
-\`\`\`
-
 ## 📝 사용 방법
 
 1. 검색바에 분석하고 싶은 키워드 입력 (예: "노란봉투법", "의대증원")
@@ -91,12 +25,6 @@ src/
 3. "분석하기" 버튼 클릭
 4. AI가 진보/보수 언론의 기사를 각각 분석
 5. 결과가 좌우로 나뉘어 표시됨
-
-## ⚠️ 주의사항
-
-- Perplexity API는 사용량에 따라 과금됩니다
-- 분석 결과는 AI 모델의 해석이므로 참고용으로 활용하세요
-- 언론사 분류는 사용자가 직접 설정한 기준입니다
 
 ## 📄 라이선스
 

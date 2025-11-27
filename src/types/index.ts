@@ -1,6 +1,6 @@
 // 뉴스 분석 관련 타입 정의
 
-export type MediaBias = 'progressive' | 'conservative';
+export type MediaBias = "progressive" | "conservative";
 
 export interface MediaSource {
   name: string;
@@ -43,4 +43,3 @@ export interface SearchParams {
   startDate: string;
   endDate: string;
 }
-
