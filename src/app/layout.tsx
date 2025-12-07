@@ -9,7 +9,7 @@ const notoSansKr = Noto_Sans_KR({
 });
 
 export const metadata: Metadata = {
-  title: "온저 3조 뉴스관점 비교 AI",
+  title: "프리즘 | 뉴스 관점 비교 AI",
   description:
     "같은 이슈를 진보와 보수 언론이 어떻게 다르게 보도하는지 AI가 분석하여 비교해 드립니다.",
   keywords: [

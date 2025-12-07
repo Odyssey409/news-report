@@ -7,11 +7,13 @@ import {
   getMediaNamesByBias,
 } from "@/config/mediaSources";
 
-// Perplexity API 클라이언트 설정
-const perplexity = new OpenAI({
-  apiKey: process.env.PERPLEXITY_API_KEY || "",
-  baseURL: "https://api.perplexity.ai",
-});
+// Perplexity API 클라이언트 생성 함수
+function createPerplexityClient(apiKey: string) {
+  return new OpenAI({
+    apiKey,
+    baseURL: "https://api.perplexity.ai",
+  });
+}
 
 interface SearchResult {
   articles: AnalyzedArticle[];
@@ -19,7 +21,86 @@ interface SearchResult {
   overallTrend: string;
 }
 
+// 필드 정규화
+function normalizeArticle(
+  article: Partial<AnalyzedArticle>,
+  bias: MediaBias
+): AnalyzedArticle {
+  const clean = (arr?: string[]) =>
+    (arr || []).filter((v) => v?.trim()).map((v) => v.trim());
+
+  return {
+    title: article.title?.trim() || "제목 미상",
+    source: article.source?.trim() || "출처 미상",
+    url: article.url?.trim() || "",
+    bias,
+    publishedDate: article.publishedDate?.trim() || "",
+    keywords: clean(article.keywords).slice(0, 5) || ["키워드 없음"],
+    mainClaim:
+      article.mainClaim?.trim() || article.summary?.trim() || "내용 확인 필요",
+    evidence: clean(article.evidence).slice(0, 3) || ["근거 확인 필요"],
+    summary: article.summary?.trim() || article.title?.trim() || "요약 없음",
+  };
+}
+
+// 텍스트에서 기사 정보 추출 (파싱 실패 대비)
+function extractArticlesFromText(
+  text: string,
+  bias: MediaBias,
+  limit = 4
+): AnalyzedArticle[] {
+  const articles: AnalyzedArticle[] = [];
+
+  // title, source, url, keywords, mainClaim, evidence, summary 모두 추출 시도
+  const articleRegex =
+    /"title"\s*:\s*"([^"]+)"[\s\S]*?"source"\s*:\s*"([^"]+)"[\s\S]*?"url"\s*:\s*"([^"]+)"/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = articleRegex.exec(text)) && articles.length < limit) {
+    const [fullMatch, title, source, url] = match;
+    const articleStart = match.index;
+    const articleEnd = text.indexOf("}", articleStart + fullMatch.length);
+    const articleText = text.substring(articleStart, articleEnd);
+
+    // 추가 필드 추출
+    const extractField = (fieldName: string, defaultValue: string = "") => {
+      const regex = new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*)"`, "s");
+      const m = articleText.match(regex);
+      return m?.[1]?.trim() || defaultValue;
+    };
+
+    const extractArray = (fieldName: string): string[] => {
+      const regex = new RegExp(`"${fieldName}"\\s*:\\s*\\[([^\\]]*)\\]`, "s");
+      const m = articleText.match(regex);
+      if (!m) return [];
+      return m[1]
+        .split(",")
+        .map((v) => v.replace(/"/g, "").trim())
+        .filter(Boolean);
+    };
+
+    articles.push(
+      normalizeArticle(
+        {
+          title,
+          source,
+          url,
+          publishedDate: extractField("publishedDate"),
+          keywords: extractArray("keywords"),
+          mainClaim: extractField("mainClaim"),
+          evidence: extractArray("evidence"),
+          summary: extractField("summary"),
+        },
+        bias
+      )
+    );
+  }
+
+  return articles;
+}
+
 async function searchAndAnalyzeNews(
+  perplexity: OpenAI,
   keyword: string,
   bias: MediaBias,
   startDate: string,
@@ -28,57 +109,44 @@ async function searchAndAnalyzeNews(
   const mediaNames = getMediaNamesByBias(bias);
   const biasLabel = bias === "progressive" ? "진보" : "보수";
 
-  const systemPrompt = `당신은 한국 뉴스 검색 및 분석 전문가입니다. 웹에서 실제 뉴스 기사를 검색하여 분석 결과를 JSON 형식으로 제공합니다.
+  const systemPrompt = `한국 뉴스 검색 전문가. 실제 기사만 찾아서 간결한 JSON으로 응답.
 
-**절대적인 규칙**: 
-1. 반드시 실제 존재하는 뉴스 기사만 검색하여 응답하세요
-2. 응답은 오직 JSON 형식만 허용됩니다. 다른 설명이나 텍스트 없이 JSON만 출력하세요
-3. 검색 결과가 없으면 빈 배열로 응답하세요
+규칙:
+1. 실제 존재하는 기사만
+2. JSON만 출력 (설명 금지)
+3. 모든 텍스트 최대한 짧게
+4. 완전한 JSON 필수
 
-**JSON 응답 형식** (이 형식을 정확히 따르세요):
+형식:
 {
   "articles": [
     {
-      "title": "실제 기사 제목",
-      "source": "언론사명",
-      "url": "https://실제기사URL",
+      "title": "제목",
+      "source": "언론사",
+      "url": "https://...",
       "publishedDate": "YYYY-MM-DD",
-      "keywords": ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5"],
-      "mainClaim": "이 기사의 핵심 주장 (1-2문장)",
-      "evidence": ["기사에서 언급된 구체적 근거1", "구체적 근거2", "구체적 근거3"],
-      "summary": "기사 전체 내용 요약 (3-4문장으로 상세하게)"
+      "keywords": ["키워드1", "키워드2", "키워드3"],
+      "mainClaim": "핵심 주장 1문장",
+      "evidence": ["근거1", "근거2"],
+      "summary": "요약 2문장"
     }
   ],
-  "commonKeywords": ["전체 기사들의 공통 키워드 5-10개"],
-  "overallTrend": "이 언론사들의 전반적인 보도 논조와 관점을 상세히 분석 (3-5문장)"
+  "commonKeywords": ["공통키워드1", "공통키워드2", "공통키워드3"],
+  "overallTrend": "전반적 논조 2문장"
 }
 
-**필수 준수사항**:
-- 최소 3개, 최대 15개의 기사를 검색하세요
-- 각 기사의 keywords는 5개 이상 추출
-- evidence는 3개 이상의 구체적 근거 제시
-- summary는 기사 내용을 상세히 요약
-- overallTrend는 해당 성향 언론의 전체적인 보도 관점을 깊이 있게 분석
-- JSON 외의 텍스트(설명, 주석 등)는 절대 포함하지 마세요`;
+중요:
+- 기사 3-4개만
+- 모든 필드 짧게
+- JSON 완성 필수`;
 
-  const userPrompt = `한국 뉴스를 검색하고 JSON으로만 응답하세요.
-
-**검색 조건**:
-- 키워드: "${keyword}"
-- 기간: ${startDate} ~ ${endDate}
-- 언론사 (${biasLabel} 성향): ${mediaNames.join(", ")}
-
-**요청사항**:
-위 ${biasLabel} 언론사들에서 "${keyword}" 관련 기사를 검색하여 각 기사별로:
-1. 제목, URL, 발행일
-2. 핵심 키워드 5개 이상
-3. 기사의 핵심 주장과 관점
-4. 주장을 뒷받침하는 구체적 근거 3개 이상
-5. 기사 내용 상세 요약
-
-**출력**: 최소 5개 ~ 최대 15개 기사를 JSON 형식으로만 응답. 설명 없이 JSON만 출력하세요.`;
+  const userPrompt = `"${keyword}" 검색. ${startDate}~${endDate}. ${biasLabel} 언론: ${mediaNames.join(
+    ", "
+  )}. JSON만 출력. 짧게.`;
 
   try {
+    console.log(`\n=== ${biasLabel} 언론 검색 시작 ===`);
+
     const response = await perplexity.chat.completions.create({
       model: "sonar-pro",
       messages: [
@@ -86,7 +154,7 @@ async function searchAndAnalyzeNews(
         { role: "user", content: userPrompt },
       ],
       temperature: 0.1,
-      max_tokens: 10000,
+      max_tokens: 8000, // 간결한 응답으로 충분
       // Perplexity 특정 옵션들
       // @ts-expect-error - Perplexity 전용 파라미터
       search_domain_filter: mediaNames.flatMap((name) => {
@@ -96,90 +164,116 @@ async function searchAndAnalyzeNews(
         return media?.domain ? [media.domain] : [];
       }),
       search_recency_filter: "month",
-      return_citations: true,
+      return_citations: false,
       return_related_questions: false,
     });
 
     const content = response.choices[0]?.message?.content || "";
 
-    // 디버그: 실제 응답 출력
-    console.log(`\n=== ${biasLabel} 언론 API 응답 ===`);
-    console.log(content.substring(0, 2000));
-    console.log("=== 응답 끝 ===\n");
+    console.log(`📄 응답 길이: ${content.length}자`);
+    if (content.length > 1000) {
+      console.log(`첫 500자: ${content.substring(0, 500)}...`);
+    } else {
+      console.log(`전체 응답: ${content}`);
+    }
 
-    // JSON 파싱 시도
+    // JSON 파싱 - 간단하고 안정적으로
     let result: SearchResult;
     try {
-      // JSON 블록 추출 시도 (여러 패턴 지원)
-      let jsonStr = content;
+      // 1. JSON 추출
+      let jsonStr = content.trim();
 
-      // 1. ```json ... ``` 블록 추출
-      const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonBlockMatch) {
-        jsonStr = jsonBlockMatch[1];
-      } else {
-        // 2. ``` ... ``` 블록 추출 (언어 표시 없는 경우)
-        const codeBlockMatch = content.match(/```\s*([\s\S]*?)\s*```/);
-        if (codeBlockMatch) {
-          jsonStr = codeBlockMatch[1];
+      // ```json ... ``` 또는 ``` ... ``` 블록 제거
+      const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1];
+      }
+
+      // 첫 { 부터 마지막 } 까지만 추출
+      const firstBrace = jsonStr.indexOf("{");
+      const lastBrace = jsonStr.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+      }
+
+      // 2. 파싱 시도
+      try {
+        result = JSON.parse(jsonStr);
+        console.log(
+          `✅ JSON 파싱 성공: ${result.articles?.length || 0}개 기사`
+        );
+      } catch (parseErr) {
+        console.log("⚠️ JSON 파싱 실패, 개별 기사 추출 시도...");
+
+        // 개별 기사 추출
+        const articles = extractArticlesFromText(content, bias, 4);
+
+        if (articles.length > 0) {
+          result = {
+            articles: articles.map((article) =>
+              normalizeArticle(article, bias)
+            ),
+            commonKeywords: ["키워드 확인 필요"],
+            overallTrend: `${biasLabel} 언론 "${keyword}" 관련 기사`,
+          };
+          console.log(`✅ 개별 추출 성공: ${articles.length}개`);
         } else {
-          // 3. 첫 번째 { 부터 마지막 } 까지 추출
-          const firstBrace = content.indexOf("{");
-          const lastBrace = content.lastIndexOf("}");
-          if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-            jsonStr = content.substring(firstBrace, lastBrace + 1);
-          }
+          // 빈 결과
+          result = {
+            articles: [],
+            commonKeywords: [],
+            overallTrend: "",
+          };
+          console.log(`❌ 기사 추출 실패`);
         }
       }
 
-      // JSON 문자열 정리
-      jsonStr = jsonStr.trim();
+      console.log(`최종 결과: ${result.articles?.length || 0}개 기사`);
 
-      console.log(
-        `파싱할 JSON 문자열 (처음 500자): ${jsonStr.substring(0, 500)}`
+      // 정규화
+      if (!result.articles) result.articles = [];
+      result.articles = result.articles.map((article) =>
+        normalizeArticle(article, bias)
       );
 
-      result = JSON.parse(jsonStr);
-
-      // articles 배열이 없으면 빈 배열로 초기화
-      if (!result.articles) {
-        result.articles = [];
+      if (!result.commonKeywords || result.commonKeywords.length === 0) {
+        result.commonKeywords = ["키워드 확인 필요"];
       }
 
-      // bias 필드 추가
-      result.articles = result.articles.map((article) => ({
-        ...article,
-        bias,
-        // 필수 필드 기본값 설정
-        keywords: article.keywords || [],
-        evidence: article.evidence || [],
-        mainClaim: article.mainClaim || article.summary || "",
-      }));
+      if (!result.overallTrend) {
+        result.overallTrend = `${biasLabel} 언론 "${keyword}" 관련 보도`;
+      }
 
-      // 기본값 설정
-      result.commonKeywords = result.commonKeywords || [];
-      result.overallTrend = result.overallTrend || "";
-    } catch (parseError) {
-      // JSON 파싱 실패 시 기본 응답 생성
-      console.error("JSON parsing failed:", parseError);
-      console.error("원본 응답:", content.substring(0, 1000));
+      console.log(
+        `✅ ${biasLabel} 검색 완료: ${result.articles.length}개 기사`
+      );
+      return result;
+    } catch (outerError) {
+      // 전체 파싱 프로세스 실패
+      console.error(`❌ ${biasLabel} 파싱 실패:`, outerError);
+
       result = {
         articles: [],
         commonKeywords: [],
-        overallTrend: `${biasLabel} 언론사의 "${keyword}" 관련 기사를 분석 중 오류가 발생했습니다.`,
+        overallTrend: "",
       };
+      return result;
     }
-
-    return result;
   } catch (error) {
-    console.error(`Error searching ${bias} news:`, error);
-    throw error;
+    console.error(`❌ ${biasLabel} 언론 API 호출 실패:`, error);
+
+    return {
+      articles: [],
+      commonKeywords: [],
+      overallTrend: `${biasLabel} 언론 검색 중 오류 발생`,
+    };
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { keyword, startDate, endDate } = await request.json();
+    const { keyword, startDate, endDate, apiKey, isAdmin } =
+      await request.json();
 
     if (!keyword) {
       return NextResponse.json(
@@ -188,18 +282,93 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!process.env.PERPLEXITY_API_KEY) {
-      return NextResponse.json(
-        { error: "Perplexity API 키가 설정되지 않았습니다." },
-        { status: 500 }
-      );
+    // API 키 결정: 관리자면 서버 키 사용, 아니면 클라이언트가 제공한 키 사용
+    let perplexityApiKey: string;
+
+    if (isAdmin) {
+      // 관리자 검증
+      if (!process.env.PERPLEXITY_API_KEY) {
+        return NextResponse.json(
+          { error: "서버에 Perplexity API 키가 설정되지 않았습니다." },
+          { status: 500 }
+        );
+      }
+      perplexityApiKey = process.env.PERPLEXITY_API_KEY;
+    } else {
+      // 게스트 모드: 클라이언트가 제공한 API 키 사용
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "API 키를 입력해주세요." },
+          { status: 400 }
+        );
+      }
+      perplexityApiKey = apiKey;
     }
 
-    // 진보/보수 동시 검색
+    // Perplexity 클라이언트 생성
+    const perplexity = createPerplexityClient(perplexityApiKey);
+
+    // 진보/보수 병렬 검색 (속도 향상) - 하나가 실패해도 다른 하나는 계속 진행
+    console.log("=== 진보/보수 언론 병렬 검색 시작 ===");
+
+    const [progressivePromise, conservativePromise] = [
+      searchAndAnalyzeNews(
+        perplexity,
+        keyword,
+        "progressive",
+        startDate,
+        endDate
+      ).catch((error) => {
+        console.error("진보 언론 검색 실패:", error);
+        return {
+          articles: [],
+          commonKeywords: [],
+          overallTrend: `진보 언론 검색 중 오류가 발생했습니다: ${
+            error instanceof Error ? error.message : "알 수 없는 오류"
+          }`,
+        } as SearchResult;
+      }),
+      searchAndAnalyzeNews(
+        perplexity,
+        keyword,
+        "conservative",
+        startDate,
+        endDate
+      ).catch((error) => {
+        console.error("보수 언론 검색 실패:", error);
+        return {
+          articles: [],
+          commonKeywords: [],
+          overallTrend: `보수 언론 검색 중 오류가 발생했습니다: ${
+            error instanceof Error ? error.message : "알 수 없는 오류"
+          }`,
+        } as SearchResult;
+      }),
+    ];
+
+    // 병렬 실행
     const [progressiveResult, conservativeResult] = await Promise.all([
-      searchAndAnalyzeNews(keyword, "progressive", startDate, endDate),
-      searchAndAnalyzeNews(keyword, "conservative", startDate, endDate),
+      progressivePromise,
+      conservativePromise,
     ]);
+
+    console.log(
+      `✅ 검색 완료 - 진보: ${progressiveResult.articles.length}개, 보수: ${conservativeResult.articles.length}개`
+    );
+
+    // 둘 다 실패한 경우에만 에러 반환
+    if (
+      progressiveResult.articles.length === 0 &&
+      conservativeResult.articles.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "진보와 보수 언론 모두에서 기사를 찾을 수 없었습니다. 키워드나 날짜 범위를 변경해보세요.",
+        },
+        { status: 404 }
+      );
+    }
 
     const result: AnalysisResult = {
       progressive: progressiveResult,
@@ -211,6 +380,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("Analysis error:", error);
+
+    // API 키 오류 체크
+    const errorMessage = error instanceof Error ? error.message : "";
+    if (
+      errorMessage.includes("401") ||
+      errorMessage.includes("unauthorized") ||
+      errorMessage.includes("invalid")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "API 키가 유효하지 않습니다. 올바른 Perplexity API 키를 입력해주세요.",
+        },
+        { status: 401 }
+      );
+    }
+
     return NextResponse.json(
       { error: "뉴스 분석 중 오류가 발생했습니다." },
       { status: 500 }
